@@ -1,4 +1,4 @@
-# Terraform EKS Airflow
+# EKS Terraform Airflow
 
 ### Requirements
 
@@ -113,7 +113,7 @@ Pipeline configuration can be found at .github/actions
 Airflow checks https://github.com/fboecker/airflow_demo_dags for new DAG's and add them to Airflow.
 
 
-##### ToDo / Next Steps
+### ToDo / Next Steps
 
 Read / Check / Implement
 
