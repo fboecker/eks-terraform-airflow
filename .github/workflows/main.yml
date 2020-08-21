@@ -1,0 +1,88 @@
+name: Airflow EKS Workflow
+# This workflow is triggered on pushes to the repository.
+on: [push]
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+  
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./terraform
+
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: 'Checkout'
+        uses: actions/checkout@v2
+      
+      # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1.1.0
+        with:
+          terraform_version: 0.13.0
+          
+      # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.    
+      - name: 'Terraform Init'
+        run: |
+          export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          export REGION=${AWS_DEFAULT_REGION:-$(aws configure get region)}
+          terraform init -backend-config="bucket=terraform-state-$ACCOUNT_ID" -backend-config="region=$REGION"
+        working-directory: terraform/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      # Checks that all Terraform configuration files adhere to a canonical format
+      #- name: 'Terraform Format'
+      #  run: terraform fmt -check
+
+      # Validates the configuration files in a directory, referring only to the configuration and not accessing any remote services...
+      - name: 'Terraform Validate'
+        run: terraform validate
+        working-directory: terraform/
+
+      # Generates an execution plan for Terraform
+      - name: 'Terraform Plan'
+        id: 'terraform_plan'
+        run: terraform plan
+        working-directory: terraform/
+        
+      # On push to master, build or change infrastructure according to Terraform configuration files
+      - name: 'Terraform Apply'
+        id: 'terraform_apply'
+        run: terraform apply -auto-approve
+        working-directory: terraform/
+
+  kubernetes:
+    needs: terraform
+    name: Deploy Applications
+    runs-on: ubuntu-latest
+    container: florianboecker/ci-image:0.1
+    steps:
+
+      - name: 'Checkout'
+        uses: actions/checkout@v2
+
+      - name: 'Setup EKS connection'
+        run: aws eks update-kubeconfig --name terraform-eks-airflow
+        env:
+           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: 'Deploy Apps'
+        working-directory: ./kubernetes
+        run: make
+        env:
+           KUBECONFIG: /github/home/.kube/config
+           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
